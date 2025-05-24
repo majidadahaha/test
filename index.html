@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>第12课评价系统</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: "微软雅黑", Arial, sans-serif; background: #f8f9fa; }
+        .container { max-width: 900px; margin: 40px auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px #ccc; }
+        .hidden { display: none; }
+        .btn { padding: 8px 20px; border: none; border-radius: 4px; background: #007bff; color: #fff; cursor: pointer; margin-top: 10px;}
+        .btn:disabled { background: #aaa; }
+        .logout { float: right; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        select, textarea { width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+        h2 { margin-top: 0; }
+        .card { background: #f1f3f6; padding: 15px; border-radius: 12px; margin-bottom: 32px; box-shadow: 0 2px 8px #e0e3e8;}
+        .star { color: #ffb400; font-size: 1.5em; cursor: pointer; }
+        .star-gray { color: #ccc; }
+        table { border-collapse: collapse; width: 100%; margin-bottom: 0;}
+        th, td { border: 1px solid #aaa; padding: 10px 8px; text-align: center; background: #fff;}
+        th { background: #e9ecef; }
+        .desc-title { font-weight: bold; background: #e9ecef; font-size: 1.1em; padding: 8px 0 8px 8px; border-radius: 8px 8px 0 0; margin-bottom: 0;}
+        .msg { color: green; margin-bottom: 10px; }
+        .card-footer { background: #f8f9fa; border-radius: 0 0 8px 8px; padding: 10px 0 0 0; text-align: right;}
+        .teacher-actions { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div id="login-section">
+        <h2>登录</h2>
+        <div class="form-group">
+            <label>用户名（1~23）</label>
+            <input type="text" id="username" placeholder="如 1">
+        </div>
+        <div class="form-group">
+            <label>密码（默认123）</label>
+            <input type="password" id="password" placeholder="123">
+        </div>
+        <button class="btn" onclick="login()">登录</button>
+        <div id="login-msg" style="color:red;margin-top:10px;"></div>
+    </div>
+
+    <div id="student-section" class="hidden">
+        <button class="btn logout" onclick="logout()">退出</button>
+        <h2>小组自评</h2>
+        <div id="student-forms"></div>
+    </div>
+
+    <div id="teacher-section" class="hidden">
+        <div class="teacher-actions">
+            <button class="btn logout" onclick="logout()">退出</button>
+            <button class="btn" onclick="clearAllData()" style="background-color: #dc3545; margin-right: 10px;">一键清除数据</button>
+        </div>
+        <h2>班级评价概览</h2>
+        <canvas id="chart" height="120"></canvas>
+    </div>
+</div>
+
+<script>
+const GROUPS = Array.from({length: 23}, (_, i) => `${i+1}`);
+const ACTIVITIES = [
+    { key: 'A1', name: '活动一-1', desc: '完成今日是否出操判断', max: 1 },
+    { key: 'A2', name: '活动一-2', desc: '说出条件计算与查表计算的不同', max: 1 },
+    { key: 'A3', name: '活动一-3', desc: '发现生活中的条件计算', max: 1 },
+    { key: 'B1', name: '活动二-1', desc: '小组合作完成实验', max: 1 },
+    { key: 'B2', name: '活动二-2', desc: '正确实验并记录数据', max: 1 },
+    { key: 'B3', name: '活动二-3', desc: '分析实验过程中计算条件，得出实验结论', max: 1 },
+    { key: 'C1', name: '活动三-1', desc: '发现模拟恒温箱实验中的控制系统', max: 1 },
+    { key: 'C2', name: '活动三-2', desc: '分析恒温箱实验中的计算规则', max: 1 }
+];
+const ACTIVITY_GROUPS = [
+    { title: '活动一：初识条件计算，感知条件计算过程', keys: ['A1', 'A2', 'A3'] },
+    { title: '活动二：探究实践，理解条件计算原理', keys: ['B1', 'B2', 'B3'] },
+    { title: '活动三：拓展提升，应用解决问题', keys: ['C1', 'C2'] }
+];
+const DEFAULT_PASSWORD = '123';
+
+function getData() {
+    return JSON.parse(localStorage.getItem('evalDataStars') || '{}');
+}
+function setData(data) {
+    localStorage.setItem('evalDataStars', JSON.stringify(data));
+}
+
+function login() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const msg = document.getElementById('login-msg');
+    msg.textContent = '';
+
+    if (username === 'teacher' && password === DEFAULT_PASSWORD) {
+        sessionStorage.setItem('user', 'teacher');
+        showSection('teacher');
+        renderChart();
+        localStorage.removeItem('comment');
+        return;
+    }
+    if (GROUPS.includes(username) && password === DEFAULT_PASSWORD) {
+        sessionStorage.setItem('user', username);
+        showSection('student');
+        renderStudentForm(username);
+        localStorage.removeItem('comment');
+        return;
+    }
+    msg.textContent = '用户名或密码错误';
+}
+
+function logout() {
+    sessionStorage.removeItem('user');
+    showSection('login');
+}
+
+function showSection(section) {
+    document.getElementById('login-section').classList.add('hidden');
+    document.getElementById('student-section').classList.add('hidden');
+    document.getElementById('teacher-section').classList.add('hidden');
+    if (section === 'login') document.getElementById('login-section').classList.remove('hidden');
+    if (section === 'student') document.getElementById('student-section').classList.remove('hidden');
+    if (section === 'teacher') document.getElementById('teacher-section').classList.remove('hidden');
+}
+
+// 临时保存未提交的星级
+let tempStars = {};
+
+function renderStudentForm(group) {
+    const data = getData();
+    let html = '';
+    tempStars = {}; // 清空临时数据
+    ACTIVITY_GROUPS.forEach((ag, idx) => {
+        html += `<div class="card"><div class="desc-title">${ag.title}</div>`;
+        html += `<div id="msg-${ag.keys.join('-')}" class="msg" style="display:none;"></div>`;
+        html += '<table><tr><th>评价描述</th><th>评价等级</th></tr>';
+        ag.keys.forEach(actKey => {
+            const act = ACTIVITIES.find(a => a.key === actKey);
+            // 优先显示已保存的，否则显示0
+            const saved = (data[group] && data[group][actKey]) ? data[group][actKey].stars : 0;
+            tempStars[actKey] = saved;
+            html += `<tr>
+                <td>${act.desc}</td>
+                <td>${renderStarsInput(actKey, saved, act.max)}</td>
+            </tr>`;
+        });
+        html += '</table>';
+        html += `<div class="card-footer"><button class="btn" onclick="submitGroup('${group}','${ag.keys.join("','")}')">提交</button></div>`;
+        html += '</div>';
+    });
+    document.getElementById('student-forms').innerHTML = html;
+}
+
+function renderStarsInput(actKey, n, max) {
+    let s = '';
+    for(let i=1;i<=max;i++) {
+        s += `<span class="star${i<=n?'':' star-gray'}" onclick="toggleTempStars('${actKey}',${i})">&#9733;</span>`;
+    }
+    return `<span id="stars-cell-${actKey}">${s}</span>`;
+}
+
+function toggleTempStars(actKey, stars) {
+    // 如果点击的是当前选中的星星，则取消选择
+    if (tempStars[actKey] === stars) {
+        tempStars[actKey] = 0;
+    } else {
+        tempStars[actKey] = stars;
+    }
+    // 刷新当前小活动的星级显示
+    const act = ACTIVITIES.find(a => a.key === actKey);
+    const cell = document.getElementById(`stars-cell-${actKey}`);
+    if (cell) {
+        let s = '';
+        for(let i=1;i<=act.max;i++) {
+            s += `<span class="star${i<=tempStars[actKey]?'':' star-gray'}" onclick="toggleTempStars('${actKey}',${i})">&#9733;</span>`;
+        }
+        cell.innerHTML = s;
+    }
+}
+
+function submitGroup(group, ...keys) {
+    const data = getData();
+    if (!data[group]) data[group] = {};
+    
+    // 保存所有评价，包括未评价的（值为0）
+    keys.forEach(key => {
+        data[group][key] = {stars: tempStars[key] || 0};
+    });
+    
+    setData(data);
+    showMsg(keys, '提交成功！', false);
+}
+
+function showMsg(keys, msg, isError) {
+    const msgDiv = document.getElementById(`msg-${keys.join('-')}`);
+    msgDiv.style.display = 'block';
+    msgDiv.style.color = isError ? 'red' : 'green';
+    msgDiv.textContent = msg;
+    setTimeout(() => { msgDiv.style.display = 'none'; }, 2000);
+}
+
+function renderChart() {
+    const data = getData();
+    
+    // 计算每个挑战的总分
+    const challengeData = GROUPS.map(group => {
+        const groupData = data[group] || {};
+        
+        // 计算每个挑战的总分
+        const challenge1 = ACTIVITY_GROUPS[0].keys.reduce((sum, key) => {
+            return sum + (groupData[key]?.stars || 0);
+        }, 0);
+        
+        const challenge2 = ACTIVITY_GROUPS[1].keys.reduce((sum, key) => {
+            return sum + (groupData[key]?.stars || 0);
+        }, 0);
+        
+        const challenge3 = ACTIVITY_GROUPS[2].keys.reduce((sum, key) => {
+            return sum + (groupData[key]?.stars || 0);
+        }, 0);
+        
+        return { challenge1, challenge2, challenge3 };
+    });
+    
+    const datasets = [
+        {
+            label: '挑战一总分',
+            data: challengeData.map(g => g.challenge1),
+            backgroundColor: '#ff6384'
+        },
+        {
+            label: '挑战二总分',
+            data: challengeData.map(g => g.challenge2),
+            backgroundColor: '#36a2eb'
+        },
+        {
+            label: '挑战三总分',
+            data: challengeData.map(g => g.challenge3),
+            backgroundColor: '#4bc0c0'
+        }
+    ];
+    
+    const ctx = document.getElementById('chart').getContext('2d');
+    if (window.myChart) window.myChart.destroy();
+    window.myChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: GROUPS,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            scales: { 
+                y: { 
+                    beginAtZero: true,
+                    min: 0,
+                    max: 5, // 修改Y轴最大值为5
+                    stepSize: 1,
+                    ticks: {
+                        callback: function(value) {
+                            return value === 0 ? '未评价' : value;
+                        }
+                    }
+                } 
+            }
+        }
+    });
+}
+
+function clearAllData() {
+    if (confirm('确定要清除所有评价数据吗？此操作不可恢复！')) {
+        localStorage.removeItem('evalDataStars');
+        renderChart();
+        alert('所有评价数据已清除！');
+    }
+}
+
+// 自动登录状态
+(function(){
+    const user = sessionStorage.getItem('user');
+    if (user === 'teacher') {
+        showSection('teacher');
+        renderChart();
+    } else if (GROUPS.includes(user)) {
+        showSection('student');
+        renderStudentForm(user);
+    } else {
+        showSection('login');
+    }
+})();
+</script>
+</body>
+</html>
